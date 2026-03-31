@@ -57,6 +57,7 @@ except Exception:  # pragma: no cover - optional dependency
 APPROVED_LABELS = {"y", "yes", "approved", "approve", "1", "true", "paid", "repaid"}
 REJECTED_LABELS = {"n", "no", "rejected", "reject", "0", "false", "default", "charged_off"}
 DEFAULT_TARGET_CANDIDATES = ["Loan_Status", "loan_status", "target", "Default", "default"]
+MODEL_DATA_VERSION = "v2_scaled_income_ratio"
 
 
 def make_one_hot_encoder() -> OneHotEncoder:
@@ -160,6 +161,38 @@ def prepare_dataframe(df: pd.DataFrame, target_column: Optional[str] = None) -> 
         if column in frame.columns:
             frame[column] = pd.to_numeric(frame[column], errors="coerce")
 
+    if "LoanAmount" in frame.columns:
+        loan_amount_median = pd.to_numeric(frame["LoanAmount"], errors="coerce").median()
+        frame["LoanAmount"] = pd.to_numeric(frame["LoanAmount"], errors="coerce").fillna(loan_amount_median)
+
+    frame = normalize_monetary_inputs(frame)
+
+    frame = engineer_features(frame)
+
+    return frame
+
+
+def normalize_monetary_inputs(df: pd.DataFrame) -> pd.DataFrame:
+    frame = df.copy()
+    if "ApplicantIncome" in frame.columns:
+        frame["ApplicantIncome"] = pd.to_numeric(frame["ApplicantIncome"], errors="coerce") / 100.0
+    if "CoapplicantIncome" in frame.columns:
+        frame["CoapplicantIncome"] = pd.to_numeric(frame["CoapplicantIncome"], errors="coerce") / 100.0
+    if "LoanAmount" in frame.columns:
+        frame["LoanAmount"] = pd.to_numeric(frame["LoanAmount"], errors="coerce") / 1000.0
+    return frame
+
+
+def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
+    frame = df.copy()
+    if {"ApplicantIncome", "CoapplicantIncome"}.issubset(frame.columns):
+        applicant_income = pd.to_numeric(frame["ApplicantIncome"], errors="coerce").fillna(0)
+        coapplicant_income = pd.to_numeric(frame["CoapplicantIncome"], errors="coerce").fillna(0)
+        frame["TotalIncome"] = applicant_income + coapplicant_income
+    if {"LoanAmount", "TotalIncome"}.issubset(frame.columns):
+        loan_amount = pd.to_numeric(frame["LoanAmount"], errors="coerce").fillna(0)
+        total_income = pd.to_numeric(frame["TotalIncome"], errors="coerce").fillna(0)
+        frame["Loan_Income_Ratio"] = loan_amount / (total_income + 1e-9)
     return frame
 
 
@@ -389,6 +422,13 @@ def get_preprocessor(bundle: "ModelBundle") -> ColumnTransformer:
     return bundle.preprocessor
 
 
+def bundle_uses_current_features(bundle: "ModelBundle") -> bool:
+    required = {"TotalIncome", "Loan_Income_Ratio"}
+    return required.issubset(set(getattr(bundle, "feature_columns", []))) and getattr(
+        bundle, "model_data_version", None
+    ) == MODEL_DATA_VERSION
+
+
 def get_feature_names(bundle: "ModelBundle") -> list[str]:
     names: list[str] = []
     names.extend(bundle.numeric_features)
@@ -451,6 +491,7 @@ class ModelBundle:
     model_name: str
     model: Any
     preprocessor: ColumnTransformer
+    scaler: Any
     feature_columns: list[str]
     numeric_features: list[str]
     categorical_features: list[str]
@@ -460,6 +501,7 @@ class ModelBundle:
     best_threshold: float
     fraud_models: dict[str, Any]
     training_rows: int
+    model_data_version: str = MODEL_DATA_VERSION
     reference_data: Optional[pd.DataFrame] = None
     positive_label: str = "Approved"
     negative_label: str = "Rejected"
@@ -595,6 +637,9 @@ def train_project(
         preprocessor=best_model.named_steps["preprocessor"]
         if hasattr(best_model, "named_steps")
         else preprocessor,
+        scaler=best_model.named_steps["preprocessor"].named_transformers_["num"].named_steps["scaler"]
+        if hasattr(best_model, "named_steps")
+        else None,
         feature_columns=X.columns.tolist(),
         numeric_features=numeric_features,
         categorical_features=categorical_features,
@@ -604,6 +649,7 @@ def train_project(
         best_threshold=0.5,
         fraud_models={},
         training_rows=len(X_train),
+        model_data_version=MODEL_DATA_VERSION,
         reference_data=X_train.sample(n=min(120, len(X_train)), random_state=random_state).copy(),
     )
 
@@ -639,6 +685,8 @@ def _coerce_sample(bundle: ModelBundle, sample: dict[str, Any]) -> pd.DataFrame:
             frame[column] = frame[column].astype(str).replace({"nan": np.nan, "None": np.nan})
     if "Dependents" in frame.columns:
         frame["Dependents"] = frame["Dependents"].replace("3+", "3")
+    frame = normalize_monetary_inputs(frame)
+    frame = engineer_features(frame)
     return frame
 
 
@@ -772,10 +820,26 @@ def predict_application(bundle: ModelBundle, sample_payload: dict[str, Any]) -> 
     sample = _coerce_sample(bundle, sample_payload)
     model = bundle.model
 
-    prediction = int(model.predict(sample)[0])
-    probabilities = model.predict_proba(sample)[0] if hasattr(model, "predict_proba") else None
-    approval_probability = float(probabilities[1]) if probabilities is not None else None
-    rejection_probability = float(probabilities[0]) if probabilities is not None else None
+    credit_history = _safe_float(sample.get("Credit_History", pd.Series([np.nan])).iloc[0], 0.0)
+    loan_income_ratio = _safe_float(sample.get("Loan_Income_Ratio", pd.Series([np.nan])).iloc[0], 0.0)
+
+    rule_based = None
+    if credit_history == 1 and loan_income_ratio < 0.05:
+        rule_based = 1
+    elif loan_income_ratio > 0.1:
+        rule_based = 0
+
+    prediction_source = "model"
+    if rule_based is not None:
+        prediction = int(rule_based)
+        prediction_source = "rule"
+        approval_probability = 1.0 if prediction == 1 else 0.0
+        rejection_probability = 1.0 if prediction == 0 else 0.0
+    else:
+        prediction = int(model.predict(sample)[0])
+        probabilities = model.predict_proba(sample)[0] if hasattr(model, "predict_proba") else None
+        approval_probability = float(probabilities[1]) if probabilities is not None else None
+        rejection_probability = float(probabilities[0]) if probabilities is not None else None
 
     fraud_models = bundle.fraud_models or {}
     transformed = bundle.preprocessor.transform(sample)
@@ -811,12 +875,14 @@ def predict_application(bundle: ModelBundle, sample_payload: dict[str, Any]) -> 
     result = {
         "prediction": prediction,
         "label": bundle.positive_label if prediction == 1 else bundle.negative_label,
+        "prediction_source": prediction_source,
         "approval_probability": approval_probability,
         "rejection_probability": rejection_probability,
         "risk_score": round(combined_risk * 100, 2),
         "fraud_flag": combined_risk >= 0.7 or any(score >= 0.75 for score in anomaly_scores.values()),
         "anomaly_scores": anomaly_scores,
         "heuristic_risk": round(heuristic_risk * 100, 2),
+        "loan_income_ratio": round(loan_income_ratio, 6),
         "top_features": explanation.get("top_features", []),
         "lime_features": explanation.get("lime_features", []),
         "risk_notes": explanation.get("risk_notes", []),

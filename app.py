@@ -4,7 +4,7 @@ from pathlib import Path
 
 from flask import Flask, flash, redirect, render_template, request, url_for
 
-from loan_system import load_bundle, predict_application, train_project
+from loan_system import bundle_uses_current_features, load_bundle, predict_application, train_project
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -75,9 +75,14 @@ def ensure_bundle():
     data_path = DEFAULT_DATA_PATH if DEFAULT_DATA_PATH.exists() else None
     if MODEL_PATH.exists():
         if data_path is None:
-            return load_bundle(str(MODEL_PATH))
-        if MODEL_PATH.stat().st_mtime >= data_path.stat().st_mtime:
-            return load_bundle(str(MODEL_PATH))
+            bundle = load_bundle(str(MODEL_PATH))
+            if bundle_uses_current_features(bundle):
+                return bundle
+        else:
+            if MODEL_PATH.stat().st_mtime >= data_path.stat().st_mtime:
+                bundle = load_bundle(str(MODEL_PATH))
+                if bundle_uses_current_features(bundle):
+                    return bundle
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     bundle, metrics = train_project(

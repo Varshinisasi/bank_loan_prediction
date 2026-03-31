@@ -30,6 +30,17 @@ If you want to use the Kaggle notebook you linked, download the dataset CSV from
 - Numeric normalization
 - Categorical encoding
 - SMOTE balancing
+- Feature engineering:
+  - `TotalIncome`
+  - `Loan_Income_Ratio`
+- Input normalization:
+  - `ApplicantIncome` divided by `100`
+  - `CoapplicantIncome` divided by `100`
+  - `LoanAmount` divided by `1000`
+- Rule-based prediction override:
+  - approve when `Credit_History = 1` and `Loan_Income_Ratio < 0.05`
+  - reject when `Loan_Income_Ratio > 0.1`
+  - otherwise use the trained model
 - Model comparison:
   - Logistic Regression
   - Decision Tree
@@ -126,3 +137,4 @@ The dashboard lets you:
 - If `SHAP` is installed, the explanation module will use it.
 - If optional libraries are missing, the project falls back to safe built-in behavior.
 - If the dataset file path is wrong, the trainer will stop with a clear error instead of silently switching to demo data.
+- If you previously trained an older bundle, retrain once so the model can learn the new engineered features.

@@ -5,7 +5,7 @@ import ast
 import json
 from pathlib import Path
 
-from loan_system import load_bundle, predict_application, train_project
+from loan_system import bundle_uses_current_features, load_bundle, predict_application, train_project
 
 
 def parse_args() -> argparse.Namespace:
@@ -47,6 +47,24 @@ def main() -> None:
 
     if payload is not None:
         bundle = load_bundle(args.model_path)
+        if not bundle_uses_current_features(bundle):
+            default_data = args.data
+            if default_data is None:
+                default_path = Path("data/raw/loan_dataset_raw.csv")
+                default_data = str(default_path) if default_path.exists() else None
+            if default_data is None:
+                raise RuntimeError(
+                    "The saved model bundle was trained before the new engineered features were added. "
+                    "Retrain first with: python loan_prediction.py --data path/to/loan_data.csv --target Loan_Status"
+                )
+            bundle, _ = train_project(
+                data_path=default_data,
+                target_column=args.target,
+                output_dir=args.output_dir,
+                data_dir=args.data_dir,
+                test_size=args.test_size,
+                random_state=args.random_state,
+            )
         result = predict_application(bundle, payload)
         print(json.dumps(result, indent=2))
         return
