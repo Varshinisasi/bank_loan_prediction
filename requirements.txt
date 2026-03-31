@@ -4,3 +4,9 @@ scikit-learn
 matplotlib
 seaborn
 joblib
+flask
+imbalanced-learn
+xgboost
+shap
+lime
+plotly

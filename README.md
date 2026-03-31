@@ -1,123 +1,128 @@
-# Bank Loan Prediction
+# Loan Risk Intelligence Project
 
-This project trains and evaluates multiple machine learning models for bank loan prediction.
+This project implements a complete loan default / approval risk system with:
 
-## What it does
+- data preprocessing
+- model comparison and selection
+- SMOTE balancing
+- fraud and anomaly detection
+- explainable AI output
+- a Flask dashboard
 
-- Loads a CSV dataset from Kaggle or any similar source
-- Cleans and preprocesses the data
-- Encodes categorical features
-- Splits data into train and test sets
-- Trains and evaluates:
+It is designed to work with a real loan dataset such as the common Kaggle loan approval dataset, but it also includes a built-in demo dataset so the pipeline can run even if you do not provide one yet.
+
+If you want to use the Kaggle notebook you linked, download the dataset CSV from Kaggle first and place it somewhere local on your machine. The notebook link itself is not the raw CSV file.
+
+## Project Structure
+
+- `loan_prediction.py` - command-line training and prediction entrypoint
+- `loan_system.py` - reusable ML pipeline, fraud scoring, and explanations
+- `app.py` - Flask dashboard
+- `templates/index.html` - dashboard UI
+- `static/style.css` - dashboard styling
+- `static/app.js` - result chart rendering
+- `applicant.json` - sample applicant payload
+
+## Features
+
+- Data cleaning and preprocessing
+- Missing value handling
+- Numeric normalization
+- Categorical encoding
+- SMOTE balancing
+- Model comparison:
   - Logistic Regression
   - Decision Tree
   - Random Forest
-- Reports:
+  - Gradient Boosting or XGBoost if installed
+- Metrics:
   - Accuracy
   - Precision
   - Recall
   - F1 score
-  - Confusion matrix
-- Performs hyperparameter tuning with cross-validation
-- Saves charts and plots to an output folder
-- Adds EDA charts:
-  - income distribution
-  - loan amount distribution
-  - correlation heatmap
-- Lets you pass one applicant record and get a prediction back
+  - ROC-AUC
+- Fraud detection:
+  - Isolation Forest
+  - Local Outlier Factor
+- Risk scoring and anomaly detection
+- Explainability with SHAP when available, plus heuristic fallback
+- Web dashboard for borrower input and prediction output
 
-## Dataset
+## Installation
 
-The script is designed for your loan approval CSV with these columns:
-
-- `Loan_ID`
-- `Gender`
-- `Married`
-- `Dependents`
-- `Education`
-- `Self_Employed`
-- `ApplicantIncome`
-- `CoapplicantIncome`
-- `LoanAmount`
-- `Loan_Amount_Term`
-- `Credit_History`
-- `Property_Area`
-- `Loan_Status`
-
-It treats `Loan_Status` as the target and converts `Y` to `1`, `N` to `0`.
-
-If your dataset uses a different target column, pass it with `--target`.
-
-## Setup
+Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## Run
+## Train the Model
 
-Train the model first:
+Run training on your dataset:
+
+```bash
+python loan_prediction.py --data path/to/loan_data.csv --target Loan_Status
+```
+
+If you do not provide a dataset, the project will use a built-in demo dataset:
 
 ```bash
 python loan_prediction.py
 ```
 
-If your target column is not `Loan_Status`:
+Outputs are saved in `outputs/`:
 
-```bash
-python loan_prediction.py --data path/to/your_dataset.csv --target target_column_name
-```
-
-Predict later using the saved best model without retraining:
-
-```bash
-python loan_prediction.py --predict-json "{\"Gender\":\"Male\",\"Married\":\"Yes\",\"Dependents\":\"1\",\"Education\":\"Graduate\",\"Self_Employed\":\"No\",\"ApplicantIncome\":4583,\"CoapplicantIncome\":1508,\"LoanAmount\":128,\"Loan_Amount_Term\":360,\"Credit_History\":1,\"Property_Area\":\"Rural\"}"
-```
-
-## Output
-
-The script creates an `outputs/` folder containing:
-
+- `best_model_bundle.joblib`
 - `metrics.csv`
-- `best_model.joblib`
-- confusion matrix plots
-- metric comparison charts
-- class distribution chart
-- ROC curve plot
-- EDA plots such as:
-  - `eda_applicantincome_distribution.png`
-  - `eda_coapplicantincome_distribution.png`
-  - `eda_loanamount_distribution.png`
-  - `eda_loan_amount_term_distribution.png`
-  - `eda_credit_history_distribution.png`
-  - `eda_income_vs_loan_amount.png`
-  - `eda_correlation_heatmap.png`
+- `evaluation_metrics.csv`
+- `evaluation_metrics.json`
+- `best_model_name.txt`
 
-## Predict With Input
+The dataset files are saved separately in `data/`:
 
-You can also use a JSON file:
+- `data/raw/loan_dataset_raw.csv`
+- `data/processed/loan_dataset_clean.csv`
+- `data/processed/train_data.csv`
+- `data/processed/test_data.csv`
+
+So you get the raw data, cleaned data, and train/test splits as separate CSV files.
+
+## Predict One Applicant
+
+Use the sample JSON file:
 
 ```bash
 python loan_prediction.py --predict-file applicant.json
 ```
 
-Prediction mode loads `outputs/best_model.joblib` and does not retrain the model or recompute metrics.
+Or pass a JSON string:
 
-The input fields should match the training features:
+```bash
+python loan_prediction.py --predict-json "{\"Gender\":\"Male\",\"Married\":\"No\",\"Dependents\":\"0\",\"Education\":\"Graduate\",\"Self_Employed\":\"No\",\"ApplicantIncome\":4583,\"CoapplicantIncome\":150,\"LoanAmount\":128,\"Loan_Amount_Term\":360,\"Credit_History\":1,\"Property_Area\":\"Rural\"}"
+```
 
-- `Gender`
-- `Married`
-- `Dependents`
-- `Education`
-- `Self_Employed`
-- `ApplicantIncome`
-- `CoapplicantIncome`
-- `LoanAmount`
-- `Loan_Amount_Term`
-- `Credit_History`
-- `Property_Area`
+## Run the Dashboard
 
-The script prints:
+Start the Flask app:
 
-- predicted result: `Approved` or `Not Approved`
-- approval probability, if the model supports it
+```bash
+python app.py
+```
+
+Then open the local server shown in the terminal.
+
+The dashboard lets you:
+
+- enter borrower details
+- get the prediction result
+- see approval probability
+- see a risk score
+- see fraud/anomaly flags
+- inspect explanation factors
+
+## Notes
+
+- If `xgboost` is installed, the gradient boosting module will use it.
+- If `SHAP` is installed, the explanation module will use it.
+- If optional libraries are missing, the project falls back to safe built-in behavior.
+- If the dataset file path is wrong, the trainer will stop with a clear error instead of silently switching to demo data.
